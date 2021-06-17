@@ -1,0 +1,1137 @@
+# Szymon Lis (384878) & Hubert Ziomek(389686) 
+# Time Series Analysis - HOME PROJECT #1
+
+# This is the code by which we obtained results presented in PDF report.
+# It analyses two models (ARIMA and VECM) 
+# for two cryptocurrencies (Bitcoin and Litecoin)
+
+# lets introduce penalty on the scientific notation
+options(scipen = 20)
+
+#Libraries
+library(tidyverse)
+library(xts)
+library(urca)
+library(quantmod)
+library(forecast)
+library(plotrix)
+library(vars)
+
+#########################################################
+#Bitcoin===========
+#Load data from yahoo finance
+btc <- getSymbols("BTC-USD",
+                  from = "2015-01-01",
+                  to = "2020-01-01", 
+                  auto.assign = FALSE)
+
+#Leave only Close price
+btc <- btc[, 4]
+head(btc)
+min(btc[, 1], na.rm=T)
+#Change name of the column
+names(btc) <- "Close"
+
+summary(btc)
+btc %>% tail
+btc %>% head
+
+plot(btc, main = "Bitcoin close price")
+
+# ARIMA model for Bitcoin
+# Let's start with check its stationarity
+# We will use the testdf() function written by the lecturer
+# Lets load it from the external file
+source("testdf.R")
+testdf(variable = btc$Close, 
+         max.augmentations = 2)
+
+# H0 (about non-stationarity) cannot be rejected 
+# (we use ADF with 1 augmentation due to 
+# autocorrelation of residuals in basic DF test).
+# Next we turn to test for non-stationarity of 1st differences 
+
+btc$dClose <- diff.xts(btc$Close)
+testdf(variable = btc$dClose, 
+       max.augmentations = 2)
+
+# 1st differences are already stationary
+# so Bitcoin close price is an I(1) process - d = 1 
+
+#Now, we can apply the Box-Jenkins procedure
+#Let's start from plotting ACF and PACF for Bitcoin
+par(mfrow = c(2, 1)) 
+acf(btc$dClose,
+    lag.max = 36,
+    ylim = c(-0.2, 0.2),  
+    lwd = 5,      
+    col = "dark green",
+    na.action = na.pass)  
+pacf(btc$dClose, 
+     lag.max = 36, 
+     ylim = c(-0.2, 0.2),
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+# ACF and PACF suggest that maybe Arima(1,1,1) could be a 
+# sensible model for Bitcoin However, PACF is not exponentially decresing.
+# Also Arima(5,1,5) or Arima(10,1,10) could fit.
+
+# lets compare different models with AIC criteria, starting with arima(1,1,1)
+#ARIMA(1,1,1)====
+arima111 <- Arima(btc$Close,
+                  order = c(1, 1, 1))
+
+# lets use coeftest() function to test for significance of model parameters
+
+coeftest(arima111)
+
+# Both coefficients are insignificant
+# additional summary measures (eg. information criteria)
+summary(arima111)
+
+# AIC for this model is 25840.46
+
+# Try Arima with a constant
+
+arima111_2 <- Arima(btc$Close, 
+                    order = c(1, 1, 1),
+                    include.constant = TRUE) 
+
+# a constant for a model with d = 1 is reported as a drift parameter
+
+coeftest(arima111_2)
+# constan term is not statistically significant here
+
+# lets move back to the model without a constant term
+# are residuals of arima111 model white noise? 
+
+plot(resid(arima111))
+
+# It doesn't look similiar to white noise
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima111), 
+    lag.max = 36,
+    ylim = c(-0.2, 0.2), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima111), 
+     lag.max = 36, 
+     ylim = c(-0.2, 0.2), 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+# We can see that 5th and 10th lag could be significant
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima111), type = "Ljung-Box", lag = 10)
+
+# at 5% we reject the null about residuals being white noise
+#so ARIMA(1,1,1) might not be correct
+
+#ARIMA(2,1,2)====
+
+arima212 <- Arima(btc$Close,
+                  order = c(2, 1, 2))
+
+coeftest(arima212)
+
+# None of the coefficients is insignificant
+# additional summary measures (eg. information criteria)
+
+summary(arima212)
+#AIC here is equal to 25844.26
+
+# are residuals of arima212 model white noise? 
+
+plot(resid(arima212))
+
+# It doesn't look like white noise
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima212), 
+    lag.max = 36,
+    ylim = c(-0.1, 0.1), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima212), 
+     lag.max = 36, 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+#Here 5th and the 10th lags fro ACF and PACF are important
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima212), type = "Ljung-Box", lag = 10)
+
+# at 5% we reject the null about residuals being 
+# white noise -- therefore, ARIMA(2,1,2) might not be correct
+
+#ARIMA(1,1,2)====
+
+arima112 <- Arima(btc$Close,
+                  order = c(1, 1, 2))
+
+coeftest(arima112)
+
+# MA(2) is not significant
+
+summary(arima112)
+
+# AIC is equal to 25842.09
+# are residuals of arima111 model white noise? 
+
+plot(resid(arima112))
+
+#They don't look like white noice
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima112), 
+    lag.max = 36,
+    ylim = c(-0.1, 0.1), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima112), 
+     lag.max = 36, 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+# Still the 5th and 10th lags are significant
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima112), type = "Ljung-Box", lag = 10)
+
+# at 5% we reject the null about residuals being 
+# white noise -- therefore, ARIMA(1,1,2) might not be correct model
+
+#ARIMA(2,1,1)====
+
+arima211 <- Arima(btc$Close,
+                  order = c(2, 1, 1),
+                  optim.control = list(maxit = 800),
+                  optim.method = "L-BFGS-B")
+
+coeftest(arima211)
+
+# AR(2) is insignificant
+
+summary(arima211)
+
+# AIC is 25842.06
+# are residuals of arima211 model white noise? 
+
+plot(resid(arima211))
+
+# Also this doesn't look like white noice
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima211), 
+    lag.max = 36,
+    ylim = c(-0.1, 0.1), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima211), 
+     lag.max = 36, 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+#Again 5th and 10th lags for both ACF and PACF are significant
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima211), type = "Ljung-Box", lag = 10)
+
+# at 5% we reject the null about residuals being 
+# white noise -- therefore, ARIMA(0,1,1) might not be correct 
+
+#ARIMA(5,1,5)====
+
+arima515 <- Arima(btc$Close,
+                    order = c(5, 1, 5))
+
+coeftest(arima515)
+
+# Only AR(5) and MA(5) are significant
+
+summary(arima515)
+
+# AIC is here 25798.91
+# are residuals of arima515 model white noise? 
+
+plot(resid(arima515))
+
+# At the first glance it doesn't looks like white noice
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima515), 
+    lag.max = 36,
+    ylim = c(-0.1, 0.1), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima515), 
+     lag.max = 36, 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+# We eliminated the importance of the 5th lags but 8th, 9th and 10th
+#  are still significant
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima515), type = "Ljung-Box", lag = 10)
+
+# at 5% we fail to reject the null about residuals being 
+# white noise -- therefore, ARIMA(5,1,5) might not be correct
+
+#ARIMA(10,1,10)====
+
+arima10110 <- Arima(btc$Close,
+                    order = c(10, 1, 10))
+
+coeftest(arima10110)
+
+# AR(3) and AR(5) are insignificant
+
+summary(arima10110)
+
+# AIC 25732.48
+# are residuals of arima10110 model white noise? 
+
+plot(resid(arima10110))
+
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima10110), 
+    lag.max = 36,
+    ylim = c(-0.1, 0.1), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima10110), 
+     lag.max = 36, 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+# We eliminated all lags until 21st
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima10110), type = "Ljung-Box", lag = 10)
+
+# at 5% we fail to reject the null about residuals being 
+# white noise -- therefore, ARIMA(10,1,10) might be correct model
+
+#ARIMA(10,1,10)===
+#without AR(3) and AR(5)
+
+arima10110_1 <- Arima(btc$Close,
+                      order = c(10, 1, 10),
+                      fixed = c(NA, NA, 0, NA, 0, NA, NA, NA, NA, NA,
+                                NA, NA, NA, NA ,NA, NA, NA, NA, NA, NA))
+
+coeftest(arima10110_1)
+
+# AR(7) is insignificant
+# additional summary measures (eg. information criteria)
+summary(arima10110_1)
+
+# AIC here is 25727.73 and it's slightly lower than for the previous model
+# are residuals of arima10110_1 model white noise? 
+
+plot(resid(arima10110_1))
+
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima10110_1), 
+    lag.max = 36,
+    ylim = c(-0.1, 0.1), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima10110_1), 
+     lag.max = 36, 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+# None of the lags is important until 21st
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima10110_1), type = "Ljung-Box", lag = 10)
+
+# at 5% we fail to reject the null about residuals being 
+# white noise -- therefore, ARIMA(10,1,10)_1 might be correct model
+
+#ARIMA(10,1,10)===
+#without AR(3), AR(5) and AR(7)====
+
+arima10110_2 <- Arima(btc$Close,
+                      order = c(10, 1, 10),
+                      fixed = c(NA, NA, 0, NA, 0, NA, 0, NA, NA, NA,
+                                NA, NA, NA, NA ,NA, NA, NA, NA, NA, NA))
+
+coeftest(arima10110_2)
+
+# All of the coefficients are significat
+
+summary(arima10110_2)
+
+# AIC is 25726.52, so its lower than for arima10110_1
+# are residuals of arima10110_2 model white noise? 
+
+plot(resid(arima10110_2))
+
+# lets check ACF and PACF
+
+par(mfrow = c(2, 1)) 
+acf(resid(arima10110_2), 
+    lag.max = 36,
+    ylim = c(-0.1, 0.1), 
+    lwd = 5, col = "dark green",
+    na.action = na.pass)
+pacf(resid(arima10110_2), 
+     lag.max = 36, 
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+par(mfrow = c(1, 1))
+
+# None of the lags is important until 21st
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima10110_2), type = "Ljung-Box", lag = 10)
+
+# at 5% we fail to reject the null about residuals being 
+# white noise -- therefore, ARIMA(10,1,10)_2 might be correct model
+
+# According to above analysis the best fitted model
+# would be ARIMA(10,1,10)_2
+
+# However, let's automatically find the best model
+#so max.orderd = 20 should be appropriate
+arima.best.AIC <- auto.arima(btc$Close,
+                             d = 1,         
+                             max.p = 10,      
+                             max.q = 10,      
+                             max.order = 20,   
+                             start.p = 1,      
+                             start.q = 1,     
+                             ic = "aic",        
+                             stepwise = FALSE,  
+                             allowdrift = TRUE, 
+                             trace = TRUE)      
+#Best model: ARIMA(9,1,8) 
+
+coeftest(arima.best.AIC)
+#AR(5)and AR(7) are insignificant
+
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima.best.AIC), type = "Ljung-Box", lag = 10)
+
+# at 5% we fail to reject the null about residuals being 
+# white noise -- therefore, ARIMA(9,1,8) might be correct model
+
+AIC(arima.best.AIC, arima10110_2)
+# AIC is worse than for the best manually selected model
+
+BIC(arima.best.AIC, arima10110_2)
+# BIC is also worse than for the best manually selected model
+
+#Check the same analysis for BIC criteria
+
+arima.best.BIC <- auto.arima(btc$Close,
+                             d = 1,             
+                             max.p = 10,       
+                             max.q = 10,       
+                             max.order = 20,   
+                             start.p = 1,     
+                             start.q = 1,     
+                             ic = "aic",       
+                             stepwise = FALSE, 
+                             allowdrift = TRUE, 
+                             trace = TRUE)     
+
+#Best model: ARIMA(9,1,8) so the same as it was before 
+
+#Finally, the best model is ARIMA(10,1,10)_2
+
+#########################################################
+#Litecoin===========
+
+
+ltc <- getSymbols("LTC-USD",
+                  from = "2015-01-01",
+                  to = "2020-01-01", 
+                  auto.assign = FALSE)
+
+ltc <- ltc[, 4]
+
+names(ltc) <- "Close"
+
+plot(ltc, main = "Litecoin close price")
+
+# ARIMA model for Litecoin
+# let's start with check its stationarity
+
+testdf(variable = ltc$Close, 
+       max.augmentations = 2)
+# H0 (about non-stationarity) cannot be rejected 
+# (we use ADF with 1 augmentation due to 
+# autocorrelation of residuals in basic DF test).
+# Next we turn to test for non-stationarity of 1st differences 
+
+ltc$dClose <- diff.xts(ltc$Close)
+
+testdf(variable = ltc$dClose, 
+       max.augmentations = 2)
+
+# 1st differences are already stationary
+# (here we can use a basic DF test), 
+# so Stellar close price is an I(1) process - d = 1 
+#Now, we can apply the Box-Jenkins procedure
+#Let's start from plotting ACF and PACF for Litecoin
+
+par(mfrow = c(2, 1)) 
+acf(ltc$dClose,
+    lag.max = 36,
+    ylim = c(-0.2, 0.2),  
+    lwd = 5,      
+    col = "dark green",
+    na.action = na.pass)  
+pacf(ltc$dClose, 
+     lag.max = 36, 
+     ylim = c(-0.2, 0.2),
+     lwd = 5, col = "dark green",
+     na.action = na.pass)
+
+#In ACF 1, 6, 9 and 10 lag is significant and in PACF none lag is significant until 8th
+# This suggests that appropriate model for Litecoin could be ARIMA(1,1,1) or
+# Arima(6,1,6) without 2,3, 4 and 5 lag etc
+# lets compare different models with AIC criteria
+
+# Let's automatically find the best model
+
+arima.best.AIC.LTC <- auto.arima(ltc$Close,
+                             d = 1,         
+                             max.p = 10,     
+                             max.q = 10,      
+                             max.order = 20,    
+                             start.p = 1,    
+                             start.q = 1,     
+                             ic = "aic",       
+                             stepwise = FALSE, 
+                             allowdrift = TRUE, 
+                             trace = TRUE,
+                             approximation = FALSE)     
+
+#Best model: ARIMA(9,1,6)        
+
+coeftest(arima.best.AIC.LTC)
+# AR(1), AR(9), MA(1), MA(5) are insignificant
+
+# Ljung-Box test (for a maximum of 10 lags)
+
+Box.test(resid(arima.best.AIC.LTC), type = "Ljung-Box", lag = 10)
+
+# at 5% we not reject the null about residuals being 
+# white noise -- therefore, ARIMA(9,1,6) might be correct model
+
+#Check the same analysis for BIC criteria
+
+arima.best.BIC.LTC <- auto.arima(ltc$Close,
+                             d = 1,            
+                             max.p = 10,        
+                             max.q = 10,        
+                             max.order = 20,    
+                             start.p = 1,       
+                             start.q = 1,       
+                             ic = "aic",        
+                             stepwise = FALSE,  
+                             allowdrift = TRUE, 
+                             trace = TRUE,
+                             approximation = FALSE)      
+
+#Best model: ARIMA(9,1,6) so the same as before
+
+####################################
+#BEST MODELS for Bitcoin and Litecoin===========
+
+#Finally, our best models for Litecoin would for be:
+#ARIMA(9,1,6) named arima.best.AIC.LTC
+# and for Bitcoin:
+#ARIMA(10,1,10) without AR(3), AR(5) and AR(7) - named arima10110_2
+
+###########################################
+#Forecasting - Bitcoin======
+# We are going to procuce forecatst for 10-periods ahead interval (since 2020-01-01)
+# This will be our out-of-sample period.
+
+# FORECAST for Bitcoin - model arima10110
+
+# lets make a prediction
+forecast_bitcoin <- forecast(arima10110_2, # model for prediction
+                      h = 10) # how many periods outside the sample
+
+# lets see the result
+forecast_bitcoin
+
+# Reach the point forecast:
+
+forecast_bitcoin$mean
+
+# lets check the class of this object
+
+class(forecast_bitcoin$mean)
+
+# let's convert it to a simple numeric vector
+
+as.numeric(forecast_bitcoin$mean)
+
+# 80% and 95% confidence intervals
+forecast_bitcoin$lower
+forecast_bitcoin$upper
+
+# we are interested only in the second column (95% confidence interval)
+# to put together both real data and the forecast on the plot,
+# we would have to convert both to xts objects
+
+# we need a data.frame with data
+# and index of dates to create an xts object
+forecast_bitcoin_data <- data.frame(f_mean  = as.numeric(forecast_bitcoin$mean),
+                                    f_lower = as.numeric(forecast_bitcoin$lower[, 2]),
+                                    f_upper = as.numeric(forecast_bitcoin$upper[, 2]))
+
+head(forecast_bitcoin_data)
+
+#Let's download 10 missng values 
+tail(btc)
+btc.oos <- getSymbols("BTC-USD",
+                      from = "2020-01-02",
+                      to = "2020-01-11", 
+                      auto.assign = FALSE)
+
+btc.oos <- btc.oos[, 4]
+
+names(btc.oos) <- "Close"
+btc.oos$dClose <- diff.xts(btc.oos$Close)
+btc.oos
+tail(btc)
+
+btc2 <- rbind(btc[, "Close"], btc.oos[, "Close"])
+tail(btc2, n = 12)
+
+forecast_bitcoin_xts <- xts(forecast_bitcoin_data,
+                            order.by = index(btc.oos))
+head(forecast_bitcoin_data)
+forecast_bitcoin_xts
+
+# we can put it together with the original data
+btc3 <- merge(btc2, forecast_bitcoin_xts)
+head(btc3)
+tail(btc3, n = 12)
+
+# lets finally plot the figure with the forecast
+# and original series
+
+tail(btc3)
+
+dev.off()
+# original data
+plot(btc3[, c("Close", "f_mean", "f_lower", "f_upper")], 
+     major.ticks = "years", 
+     grid.ticks.on = "years",
+     grid.ticks.lty = 3,
+     main = "10 day forecast of Bitcoin",
+     col = c("black", "blue", "red", "red"))
+
+# period is too long - lets see its zoom
+plot(btc3["2019-05-01/", # limit the rows
+          c("Close", "f_mean", "f_lower", "f_upper")], 
+     major.ticks = "days", 
+     grid.ticks.on = "days",
+     grid.ticks.lty = 3,
+     main = "10 day forecast of Bitcoin",
+     col = c("black", "blue", "red", "red"))
+
+# checking forecast quality 
+
+# real values - last 10 observations
+btc4 <- tail(btc3, 10)  
+btc4
+
+# finally we can calculate popular measures of ex-post prediction errors
+btc4$mae   <-  abs(btc4$Close - btc4$f_mean)
+btc4$mse   <-  (btc4$Close - btc4$f_mean) ^ 2
+btc4$mape  <-  abs((btc4$Close - btc4$f_mean)/btc4$Close)
+btc4$amape <-  abs((btc4$Close - btc4$f_mean)/(btc4$Close + btc4$f_mean))
+
+btc4
+
+# and get their means
+colMeans(btc4[, c("mae", "mse", "mape", "amape")])
+mean(btc4[, "mae"])
+
+colMeans(btc4, na.rm = TRUE)
+#turn off scientific notation
+options(scipen = 999)
+colMeans(btc4, na.rm = TRUE)
+
+# or medians
+apply(btc4[, c("mae", "mse", "mape", "amape")], 2, FUN = median)
+
+###########################################
+#Forecasting - Litecoin======
+
+# lets make a prediction
+forecast_litecoin <- forecast(arima.best.AIC.LTC, # model for prediction
+                              h = 10) # how many periods outside the sample
+
+# lets see the result
+forecast_litecoin
+
+# Reach the point forecast
+
+forecast_litecoin$mean
+
+# lets check the class of this object
+
+class(forecast_litecoin$mean)
+
+# let's convert it to a simple numeric vector
+
+as.numeric(forecast_litecoin$mean)
+
+# 80% and 95% confidence intervals
+forecast_litecoin$lower
+forecast_litecoin$upper
+
+# we are interested only in the second column (95% confidence interval)
+
+# to put together both real data and the forecast on the plot, 
+# we would have to convert both to xts objects
+
+# we need a data.frame with data
+# and index of dates to create an xts object
+forecast_litecoin_data <- data.frame(f_mean  = as.numeric(forecast_litecoin$mean),
+                                     f_lower = as.numeric(forecast_litecoin$lower[, 2]),
+                                     f_upper = as.numeric(forecast_litecoin$upper[, 2]))
+
+head(forecast_litecoin_data)
+
+# to create an xts object we will copy values of index from the original dataset btc
+#Let's download 10 missng values 
+
+ltc.oos <- getSymbols("LTC-USD",
+                      from = "2020-01-02",
+                      to = "2020-01-11", 
+                      auto.assign = FALSE)
+ltc.oos <- ltc.oos[, 4]
+
+names(ltc.oos) <- "Close"
+ltc.oos$dClose <- diff.xts(ltc.oos$Close)
+ltc.oos
+tail(ltc)
+
+ltc2 <- rbind(ltc[, "Close"], ltc.oos[, "Close"])#in sample datas merged with out of sample datas
+
+tail(ltc2, n = 12)
+
+forecast_litecoin_xts <- xts(forecast_litecoin_data,
+                             order.by = index(ltc.oos))
+head(forecast_litecoin_data)
+forecast_litecoin_xts
+
+# we can put it together with the original data
+ltc3 <- merge(ltc2, forecast_litecoin_xts)
+head(ltc3)
+tail(ltc3, n = 12)
+
+# lets finally plot the figure with the forecast and original series
+
+tail(ltc3)
+dev.off()
+# original data
+plot(ltc3[, c("Close", "f_mean", "f_lower", "f_upper")], 
+     major.ticks = "years", 
+     grid.ticks.on = "years",
+     grid.ticks.lty = 3,
+     main = "10 day forecast of Litecoin",
+     col = c("black", "blue", "red", "red"))
+
+# period is too long - lets see its zoom
+plot(ltc3["2019-05-01/", # limit the rows
+          c("Close", "f_mean", "f_lower", "f_upper")], 
+     major.ticks = "days", 
+     grid.ticks.on = "days",
+     grid.ticks.lty = 3,
+     main = "10 day forecast of Litecoin",
+     col = c("black", "blue", "red", "red"))
+
+# checking forecast quality 
+# real values - last 10 observations
+ltc4 <- tail(ltc3, 10)  
+ltc4
+
+# finally we can calculate popular measures of ex-post prediction errors
+ltc4$mae   <-  abs(ltc4$Close - ltc4$f_mean)
+ltc4$mse   <-  (ltc4$Close - ltc4$f_mean) ^ 2
+ltc4$mape  <-  abs((ltc4$Close - ltc4$f_mean)/ltc4$Close)
+ltc4$amape <-  abs((ltc4$Close - ltc4$f_mean)/(ltc4$Close + ltc4$f_mean))
+
+ltc4
+
+# and get their means
+colMeans(ltc4[, c("mae", "mse", "mape", "amape")])
+mean(ltc4[, "mae"])
+
+colMeans(ltc4, na.rm = TRUE)
+#turn off scientific notation
+options(scipen = 999)
+colMeans(ltc4, na.rm = TRUE)
+
+# or medians
+apply(ltc4[, c("mae", "mse", "mape", "amape")], 2, FUN = median)
+
+###########################################################
+#Cointegration Analysis======
+
+btc_ltc <- cbind(btc[,1],ltc[,1])
+
+names(btc_ltc)[1] <- "btc.close"
+names(btc_ltc)[2] <- "ltc.close"
+
+multiplierbtc = 100 / as.numeric(head(btc_ltc$btc.close, 1))
+multiplierltc = 100 / as.numeric(head(btc_ltc$ltc.close, 1))
+plotbtcltc <- merge.xts(btc_ltc$btc.close*multiplierbtc, btc_ltc$ltc*multiplierltc)
+plot(plotbtcltc[, c(1,2)],
+     col = c("red", "green"),
+     major.ticks = "years", 
+     grid.ticks.on = "years",
+     grid.ticks.lty = 3,
+     main = "Normalized prices of Bitcoin and Litecoin",
+     legend.loc = "topright")
+
+#Both currencies are integrated in the first order
+# Estimating cointegrating vector
+
+model.coint <- lm(btc.close ~ ltc.close, 
+                  data = btc_ltc)
+
+summary(model.coint)
+
+# Testing stationarity of residuals 
+
+testdf(variable = residuals(model.coint), 
+       max.augmentations = 3)
+
+#Residuals are stationary, cause p_adf is lower than 0.05  for each autgmentation
+# which means that bitcoin close price and litecoin close price are cointegrated
+# The cointegrating vector is [1, - 1090.8953, -61.9403]
+# which defines the cointegrating relationship as:
+# 1 * btc.close - 1090.8953 - 61.9403 * ltc.close
+# Creating first lags of residuals and adding it to the dataset
+
+btc_ltc$lresid <- lag.xts(residuals(model.coint))
+
+# Estimating ECM
+
+model.ecm <- lm(btc.close ~ ltc.close + lresid - 1,
+                # -1 denotes a model without a constant
+                data = btc_ltc) 
+
+summary(model.ecm)
+
+# parameter 71.05223 describes a short term relationship
+# between Bitcoin price and Litecoin price, so if Litecoin price increases by 1, 
+# Bitcoin price in the SHORT RUN will increase by 71.05223
+
+# the long run relationship is described by the parameter 61.9403 from 
+# the cointegrating relationship: so if Bitcoin price increases by 1
+# in the LONG RUN Litecoin price will increase by 61.9403
+
+# 0.98335 is the adjustment coefficient.It means that 98.3% of the unexpected error (increase in gap)
+# will be corrected in the next period, sso any unexpected deviation
+# should be corrected finally within about around 1 period (1/98.3%) 
+
+# Now let's check, whether PPI Granger causes CPI and vice versa.
+
+# is Bitcoin close price a Granger cause of Litecoin close price?
+grangertest(btc.close ~ ltc.close,
+            data = btc_ltc,
+            order = 3)
+
+# is Litecoin close price a Granger cause of Bitcoin close price?
+grangertest(ltc.close ~ btc.close,
+            data = btc_ltc,
+            order = 3)
+
+# In both cases the null about NO CAUSALITY is strongly rejected,
+# So there is a bidirectional causality
+
+#################################################
+# btc_ltc - Johansen cointegration test======
+
+head(btc)
+head(ltc)
+btc <- btc[ , 1]
+ltc <- ltc[ , 1]
+#change columns name
+names(btc) <- "btc"
+names(ltc) <- "ltc"
+
+#and merge data
+btc_ltc <- cbind(btc,ltc)
+head(btc_ltc)
+
+class(btc_ltc)
+
+johan.test.trace <- ca.jo(btc_ltc,      
+                          ecdet = "const",
+                          type = "trace",  
+                          K = 4)
+
+summary(johan.test.trace) 
+
+# interpretation of results
+#          test 10pct  5pct  1pct
+#r <= 1 |  3.42  7.52  9.24 12.97
+#r = 0  | 24.82 17.85 19.96 24.60
+
+
+#H0: r = 0
+# r - rank
+
+# 24.82 > 19.96 -> null  rejected at 5% level
+
+# next we test that r <= 1,
+# here test stat < crit => null NOT rejected
+# 3.42 < 9.24 -> null NOT  rejected at 5% level
+
+#Therefore, we have exactly one cointegrating relationship
+# and our cointegration vector is below:
+
+#            btc.l4         
+#btc.l4      1.00000     
+#ltc.l4    -78.48916    
+#constant -286.19006
+
+# lets apply the alternative variant of the test
+
+johan.test.eigen <- ca.jo(btc_ltc,        
+                          ecdet = "const",
+                          type = "eigen", 
+                          K = 4)
+
+summary(johan.test.eigen) 
+
+# the conclusions are the same: one cointegrating vector 
+
+##################################################
+#BTC_LTC VECM model=======
+
+#We have stored two specifications of VECM model: trace and eigen
+
+# they give the same cointegrating vector, so any of the 
+# two can be used to estimate VECM
+
+# VEC model is estimated by the cajorls() function
+
+btc_ltc.vec4 <- cajorls(johan.test.eigen,
+                        r = 1) 
+
+str(btc_ltc.vec4)
+
+# $rlm includes the results of the resiricted linear model
+
+summary(btc_ltc.vec4$rlm)
+
+
+# The VECM is given by:
+# Dy_t = Pi*y_(t-1) + Gamma1*Dy_(t-1) + ... + Gamma5*Dy_(t-5) + e_t
+# ect1 is the cointegrating relationship 
+# added in both equations
+
+# we can reparametrize the VEC model into VAR
+# (here we use the specification object)
+
+btc_ltc.vec4.asVAR <- vec2var(johan.test.eigen,
+                              r = 1)
+
+# lets see the result
+btc_ltc.vec4.asVAR
+
+# We can calculate and plot Impulse Response Functions
+par(mar = rep(2, 4))
+plot(irf(btc_ltc.vec4.asVAR, 
+         n.ahead = 36))
+
+#We can see that effect of generating impulse from btc
+#resulting in a strong, positive effect in btc and just negligible effect on ltc
+#On the other hand, the impulse from ltc has negatively gaining
+#in the long-run impact on btc and negligible effect on ltc
+
+# and variance decomposition
+par(mar = rep(2, 4))
+plot(fevd(btc_ltc.vec4.asVAR, 
+          n.ahead = 36))
+
+# As time passes, the significance of Bitcoin influence on Litecon is growing
+
+# lets check if model residuals are autocorrelated
+
+head(residuals(btc_ltc.vec4.asVAR))
+
+serial.test(btc_ltc.vec4.asVAR)
+# null about NO autocorrelatoin of residuals is rejected
+# residuals are correlated its allarming in terms 
+# of diagnostic of model. It means that standard  error is biased 
+
+# lets check normality of residuals (Jarque-Bera test)
+# Johansen test is sensitive to lack of normality
+
+normality.test(btc_ltc.vec4.asVAR)
+# normality rejected p-value < 0.05 - > reject H0
+
+# Unforrtunately, we have some problems regarding
+#residuals -  they are autocorellated and do not origin of normal distriution
+
+################################################################################
+#  BTC_LTC - forecasting based on the VEC========
+# Now we will calculate 10-day-ahead forecasts for both BTC and LTC variables.
+
+tail(btc_ltc, 20)
+
+# lets put aside last 10 observations
+btc_ltc.short <- btc_ltc["/2019-12-22",]
+
+tail(btc_ltc.short)
+tail(btc_ltc)
+
+# To run forecast we reparametrize  VEC into VAR - it is done via vec2var() function
+
+btc_ltc.vec4.fore <- predict(vec2var(johan.test.eigen,
+                            r = 1),
+                             n.ahead = 10, 
+                             ci = 0.95) 
+
+# the resulting object has the same structure as forecasts for VAR model
+
+# VEC forecasts for btc
+btc_ltc.vec4.fore$fcst$btc
+
+# VEC and for ltc
+btc_ltc.vec4.fore$fcst$ltc
+
+# lets store it as an xts object and add 10 missing values
+btc.oos
+ltc.oos
+btc_ltc.oos <- merge(btc.oos, ltc.oos)
+btc_ltc.oos
+
+btc_forecast <- xts(btc_ltc.vec4.fore$fcst$btc[,-4], 
+                    # we exclude the last column with CI
+                    tail(index(btc_ltc.oos), 10))
+
+names(btc_forecast) <- c("BTC_fore", "BTC_lower", "BTC_upper")
+
+#ltc forecasts 
+ltc_forecast <- xts(btc_ltc.vec4.fore$fcst$ltc[,-4],
+                    tail(index(btc_ltc.oos), 10))
+
+names(ltc_forecast) <- c("LTC_fore", "LTC_lower", "LTC_upper")
+
+# lets put the data together
+tail(btc_ltc)
+tail(btc_ltc.oos)
+
+btc_ltc <- merge(btc_ltc,
+                 btc_forecast,
+                 ltc_forecast)
+
+tail(btc_ltc,11)
+# lets compare the forecasted and real data on the plot
+# Bitcoin forecast plot 
+
+btc_ltc$btc <- btc2$Close
+btc_ltc$ltc <- ltc2$Close
+
+plot(btc_ltc["2019-05-01/", c("btc", "BTC_fore",
+                        "BTC_lower", "BTC_upper")], 
+     major.ticks = "years", 
+     grid.ticks.on = "years",
+     grid.ticks.lty = 3,
+     main = "10 day forecast of Bitcoin",
+     col = c("black","blue", "red", "red"))
+
+# Litecoin forecast plot
+plot(btc_ltc["2019-05-01/", c("ltc", "LTC_fore",
+                              "LTC_lower", "LTC_upper")], 
+     major.ticks = "years", 
+     grid.ticks.on = "years",
+     grid.ticks.lty = 3,
+     main = "10 day forecast of Litecoin",
+     col = c("black", "blue", "red", "red"))
+
+########################################
+#Forecast quality - VEC model===========
+
+# Lets define two new objects:
+
+btc5 <- tail(merge(btc.oos, btc_forecast), 10)
+btc5
+
+ltc5 <- tail(merge(ltc.oos, ltc_forecast), 10)
+ltc5
+
+#Popular measures of ex-post prediction errors for Bitcoin
+btc5$mae   <-  abs(btc5$Close - btc5$BTC_fore)
+btc5$mse   <-  (btc5$Close - btc5$BTC_fore) ^ 2
+btc5$mape  <-  abs((btc5$Close - btc5$BTC_fore)/btc5$Close)
+btc5$amape <-  abs((btc5$Close - btc5$BTC_fore)/(btc5$Close + btc5$BTC_fore))
+
+btc5
+
+#Means of the the measures
+colMeans(btc5[, c("mae", "mse", "mape", "amape")])
+mean(btc5[, "mae"])
+
+colMeans(btc5, na.rm = TRUE)
+#turn off scientific notation
+options(scipen = 999)
+colMeans(btc5, na.rm = TRUE)
+
+#Medians of the measures
+apply(btc5[, c("mae", "mse", "mape", "amape")], 2, FUN = median)
+
+#Popular measures of ex-post prediction errors for Litecoin
+ltc5$mae   <-  abs(ltc5$Close - ltc5$LTC_fore)
+ltc5$mse   <-  (ltc5$Close - ltc5$LTC_fore) ^ 2
+ltc5$mape  <-  abs((ltc5$Close - ltc5$LTC_fore)/ltc5$Close)
+ltc5$amape <-  abs((ltc5$Close - ltc5$LTC_fore)/(ltc5$Close + ltc5$LTC_fore))
+
+ltc5
+
+#Means of the the measures
+colMeans(ltc5[, c("mae", "mse", "mape", "amape")])
+mean(ltc5[, "mae"])
+
+colMeans(ltc5, na.rm = TRUE)
+#turn off scientific notation
+options(scipen = 999)
+colMeans(ltc5, na.rm = TRUE)
+
+#Medians of the measures
+apply(ltc5[, c("mae", "mse", "mape", "amape")], 2, FUN = median)
+
+# For both cryptocurrencies VEC is better model in according to 
+# MAE, MSE, MAPE, AMAPE
